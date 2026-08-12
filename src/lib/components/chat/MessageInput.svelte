@@ -2575,6 +2575,7 @@
 										bind:tab={inputMenuTab}
 										closeOnOutsideClick={inputMenuCloseOnOutsideClick}
 										bind:files
+										bind:selectedToolIds
 										selectedModels={selectedModelIds}
 										fileUploadCapableModels={getFilesystemUploadTerminal(
 											$selectedTerminalId,
