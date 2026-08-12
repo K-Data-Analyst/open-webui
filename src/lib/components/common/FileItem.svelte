@@ -36,6 +36,7 @@
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
+	import ChartBar from '../icons/ChartBar.svelte';
 	let showModal = false;
 
 	const decodeString = (str: string) => {
@@ -84,7 +85,9 @@
 		<div
 			class="size-10 shrink-0 flex justify-center items-center bg-black/20 dark:bg-white/10 text-white rounded-xl"
 		>
-			{#if !loading}
+			{#if !loading && type === 'powerbi_dataset'}
+				<ChartBar className="size-4.5" />
+			{:else if !loading}
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
 					viewBox="0 0 24 24"
@@ -115,9 +118,11 @@
 							? $i18n.t('Note')
 							: type === 'chat'
 								? $i18n.t('Chat')
-								: type === 'file' || type === 'filesystem'
-									? $i18n.t('File')
-									: $i18n.t('Document')}
+								: type === 'powerbi_dataset'
+									? $i18n.t('Power BI Dataset')
+									: type === 'file' || type === 'filesystem'
+										? $i18n.t('File')
+										: $i18n.t('Document')}
 					placement="top"
 				>
 					{#if type === 'collection'}
@@ -128,6 +133,8 @@
 						<ChatBubble className="size-3.5" />
 					{:else if type === 'folder'}
 						<Folder className="size-3.5" />
+					{:else if type === 'powerbi_dataset'}
+						<ChartBar className="size-3.5" />
 					{:else}
 						<DocumentPage className="size-3.5" />
 					{/if}
@@ -157,6 +164,11 @@
 					{$i18n.t('Document')}
 				{:else if type === 'collection'}
 					{$i18n.t('Collection')}
+				{:else if type === 'powerbi_dataset'}
+					<span class="line-clamp-1">
+						{$i18n.t('Power BI Dataset')}{#if item?.workspace_name}
+							&nbsp;·&nbsp;{item.workspace_name}{/if}
+					</span>
 				{:else}
 					<span class=" capitalize line-clamp-1">{type}</span>
 				{/if}
@@ -177,6 +189,10 @@
 					{#if size}
 						<div class="max-w-[35%] shrink-0 truncate text-[0.6875rem] capitalize text-gray-500">
 							{formatFileSize(size)}
+						</div>
+					{:else if type === 'powerbi_dataset'}
+						<div class="max-w-[35%] shrink-0 truncate text-[0.6875rem] text-gray-500">
+							{item?.workspace_name || $i18n.t('Power BI')}
 						</div>
 					{:else}
 						<div class="max-w-[35%] shrink-0 truncate text-[0.6875rem] capitalize text-gray-500">
