@@ -133,7 +133,7 @@ async def permission_cache_set(request: Request, key: str, value, ttl: int):
 
 
 async def filter_datasets_by_build_permission(
-    request: Request, user_id: str, items: list[dict], token: str
+    request: Request, user_id: str, items: list[dict], token: str, force_refresh: bool = False
 ) -> list[dict]:
     ttl = await get_permission_cache_ttl()
 
@@ -143,7 +143,11 @@ async def filter_datasets_by_build_permission(
 
     for item in candidates:
         dataset_id = str(item['id']).lower()
-        cached = await permission_cache_get(request, f'{CACHE_KEY_PREFIX}:build:{user_id}:{dataset_id}')
+        cached = (
+            None
+            if force_refresh
+            else await permission_cache_get(request, f'{CACHE_KEY_PREFIX}:build:{user_id}:{dataset_id}')
+        )
         if cached is not None:
             results[dataset_id] = bool(cached)
         elif dataset_id not in to_probe:
@@ -277,6 +281,7 @@ async def get_workspace_datasets(
     request: Request,
     workspace_id: str,
     query: Optional[str] = None,
+    refresh: bool = False,
     user=Depends(get_verified_user),
 ):
     await ensure_powerbi_enabled()
@@ -307,7 +312,7 @@ async def get_workspace_datasets(
         items = [item for item in items if query in (item.get('name') or '').lower()]
 
     if items and await Config.get('powerbi.require_build_permission', True):
-        items = await filter_datasets_by_build_permission(request, user.id, items, token)
+        items = await filter_datasets_by_build_permission(request, user.id, items, token, force_refresh=refresh)
 
     return {
         'items': items,
