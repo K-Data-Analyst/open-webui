@@ -18,6 +18,7 @@
 	import Refresh from '$lib/components/icons/Refresh.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
+	import ChartBar from '$lib/components/icons/ChartBar.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
@@ -25,12 +26,14 @@
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
 	import Knowledge from './InputMenu/Knowledge.svelte';
+	import PowerBI from './InputMenu/PowerBI.svelte';
 	import AttachWebpageModal from './AttachWebpageModal.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let files = [];
+	export let selectedToolIds = [];
 
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
@@ -103,6 +106,19 @@
 		];
 
 		show = false;
+	};
+
+	const onPowerBISelect = (item, status) => {
+		onSelect(item);
+
+		// Auto-enable the configured Power BI MCP tool server so its tools are
+		// live for the send.
+		if (status?.mcp_server_id) {
+			const toolId = `server:mcp:${status.mcp_server_id}`;
+			if (!selectedToolIds.includes(toolId)) {
+				selectedToolIds = [...selectedToolIds, toolId];
+			}
+		}
 	};
 </script>
 
@@ -360,6 +376,27 @@
 						</button>
 					</Tooltip>
 
+					{#if $config?.features?.enable_powerbi_integration}
+						<button
+							class="flex gap-2 w-full items-center h-[1.6875rem] px-2 text-[13px] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
+							on:click={() => {
+								tab = 'powerbi';
+							}}
+						>
+							<ChartBar />
+
+							<div class="flex items-center w-full justify-between">
+								<div class=" line-clamp-1">
+									{$i18n.t('Attach Power BI Dataset')}
+								</div>
+
+								<div class="text-gray-500">
+									<ChevronRight />
+								</div>
+							</div>
+						</button>
+					{/if}
+
 					<Tooltip
 						content={fileUploadCapableModels.length !== selectedModels.length
 							? $i18n.t('Model(s) do not support file upload')
@@ -609,6 +646,25 @@
 					</button>
 
 					<Knowledge {onSelect} />
+				</div>
+			{:else if tab === 'powerbi'}
+				<div class="flex max-h-72 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
+					<button
+						class="flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+						on:click={() => {
+							tab = '';
+						}}
+					>
+						<ChevronLeft />
+
+						<div class="flex items-center w-full justify-between">
+							<div>
+								{$i18n.t('Power BI')}
+							</div>
+						</div>
+					</button>
+
+					<PowerBI onSelect={onPowerBISelect} />
 				</div>
 			{:else if tab === 'notes'}
 				<div class="flex max-h-72 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>

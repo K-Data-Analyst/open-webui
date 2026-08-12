@@ -2182,6 +2182,7 @@
 								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
 									<InputMenu
 										bind:files
+										bind:selectedToolIds
 										selectedModels={selectedModelIds}
 										fileUploadCapableModels={getFilesystemUploadTerminal(
 											$selectedTerminalId,

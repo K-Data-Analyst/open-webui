@@ -813,6 +813,53 @@ async def recover_static_oauth_client_metadata(connection: dict, oauth_client_in
     return recovered
 
 
+async def build_powerbi_oauth_client_info(base_url: str | None = None) -> dict | None:
+    """
+    Build OAuth client info for the dedicated Power BI AAD client from config.
+
+    Returns None when the integration is disabled, when it runs in 'sso' mode
+    (which reuses the Microsoft login token instead), or when the AAD app
+    registration is incomplete.
+    """
+    config = await Config.get_many(
+        'powerbi.enable',
+        'powerbi.auth_mode',
+        'powerbi.client_id',
+        'powerbi.client_secret',
+        'powerbi.tenant_id',
+        'powerbi.oauth_scope',
+        'webui.url',
+    )
+
+    if not config.get('powerbi.enable'):
+        return None
+    if (config.get('powerbi.auth_mode') or 'oauth_client') != 'oauth_client':
+        return None
+
+    client_id = config.get('powerbi.client_id')
+    client_secret = config.get('powerbi.client_secret')
+    tenant_id = config.get('powerbi.tenant_id')
+    if not (client_id and client_secret and tenant_id):
+        return None
+
+    redirect_base_url = (str(config.get('webui.url') or base_url or '')).rstrip('/')
+    if not redirect_base_url:
+        log.warning('Power BI OAuth client requires WEBUI_URL (webui.url) to build its redirect URI')
+        return None
+
+    return {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'redirect_uris': [f'{redirect_base_url}/oauth/clients/powerbi/callback'],
+        'grant_types': ['authorization_code', 'refresh_token'],
+        'response_types': ['code'],
+        'scope': config.get('powerbi.oauth_scope')
+        or 'openid profile email offline_access https://analysis.windows.net/powerbi/api/.default',
+        'token_endpoint_auth_method': 'client_secret_post',
+        'issuer': f'https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration',
+    }
+
+
 class OAuthClientManager:
     def __init__(self, app):
         self.oauth = OAuth()
@@ -871,11 +918,20 @@ class OAuthClientManager:
 
     async def ensure_client_from_config(self, client_id):
         """
-        Lazy-load an OAuth client from the current TOOL_SERVER_CONNECTIONS
-        config if it hasn't been registered on this node yet.
+        Lazy-load an OAuth client from the current config (TOOL_SERVER_CONNECTIONS
+        or the Power BI integration) if it hasn't been registered on this node yet.
         """
         if client_id in self.clients:
             return self.clients[client_id]['client']
+
+        if client_id == 'powerbi':
+            try:
+                oauth_client_info = await build_powerbi_oauth_client_info()
+                if oauth_client_info:
+                    return self.add_client(client_id, OAuthClientInformationFull(**oauth_client_info))['client']
+            except Exception as e:
+                log.error(f'Failed to lazily add Power BI OAuth client from config: {e}')
+            return None
 
         try:
             connections = await Config.get('tool_server.connections', [])

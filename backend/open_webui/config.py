@@ -858,6 +858,33 @@ ONEDRIVE_SHAREPOINT_URL = os.getenv('ONEDRIVE_SHAREPOINT_URL', '')
 
 ONEDRIVE_SHAREPOINT_TENANT_ID = os.getenv('ONEDRIVE_SHAREPOINT_TENANT_ID', '')
 
+####################################
+# Power BI
+####################################
+
+# If configured, users can attach Power BI datasets to chats.
+ENABLE_POWERBI_INTEGRATION = os.getenv('ENABLE_POWERBI_INTEGRATION', 'False').lower() == 'true'
+
+# 'oauth_client' uses a dedicated AAD app registration (POWERBI_CLIENT_ID et al.);
+# 'sso' reuses the Microsoft login token, which only works if the admin added the
+# Power BI scope to MICROSOFT_OAUTH_SCOPE.
+POWERBI_AUTH_MODE = os.getenv('POWERBI_AUTH_MODE', 'oauth_client')
+
+POWERBI_CLIENT_ID = os.getenv('POWERBI_CLIENT_ID', '')
+
+POWERBI_CLIENT_SECRET = os.getenv('POWERBI_CLIENT_SECRET', '')
+
+POWERBI_TENANT_ID = os.getenv('POWERBI_TENANT_ID', '')
+
+POWERBI_OAUTH_SCOPE = os.getenv(
+    'POWERBI_OAUTH_SCOPE',
+    'openid profile email offline_access https://analysis.windows.net/powerbi/api/.default',
+)
+
+# Tool-server connection id of "the" Power BI MCP server; drives auto-enabling
+# the server when a dataset is attached and server-side dataset id binding.
+POWERBI_MCP_SERVER_ID = os.getenv('POWERBI_MCP_SERVER_ID', '')
+
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower()
 
@@ -2872,6 +2899,13 @@ DEFAULT_CONFIG = {
     'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
     'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
     'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,
+    'powerbi.enable': ENABLE_POWERBI_INTEGRATION,
+    'powerbi.auth_mode': POWERBI_AUTH_MODE,
+    'powerbi.client_id': POWERBI_CLIENT_ID,
+    'powerbi.client_secret': POWERBI_CLIENT_SECRET,
+    'powerbi.tenant_id': POWERBI_TENANT_ID,
+    'powerbi.oauth_scope': POWERBI_OAUTH_SCOPE,
+    'powerbi.mcp_server_id': POWERBI_MCP_SERVER_ID,
     'rag.content_extraction_engine': CONTENT_EXTRACTION_ENGINE,
     'rag.content_extraction.supported_media_mime_types': CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
     'rag.datalab_marker_api_key': DATALAB_MARKER_API_KEY,

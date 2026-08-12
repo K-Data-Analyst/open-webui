@@ -1994,6 +1994,12 @@ async def chat_completion_files_handler(
 
     files = [item for item in (body.get('metadata', {}).get('files', None) or []) if item.get('type') != 'filesystem']
     if files:
+        # Power BI dataset attachments carry no retrievable content — drop them
+        # so a chat with only dataset attachments skips query generation and
+        # retrieval entirely.
+        files = [item for item in files if item.get('type') != 'powerbi_dataset']
+
+    if files:
         # Check if all files are in full context mode
         all_full_context = all(item.get('context') == 'full' for item in files)
 
@@ -2837,7 +2843,50 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             'features': features,
         }
     )
+
+    # Power BI dataset attachments stay in metadata['files'] (the RAG pipeline
+    # skips unknown types) but are also collected separately for context
+    # injection and MCP tool-call binding.
+    powerbi_datasets = [f for f in (files or []) if isinstance(f, dict) and f.get('type') == 'powerbi_dataset']
+    if powerbi_datasets:
+        metadata['powerbi_datasets'] = powerbi_datasets
+        metadata['powerbi_mcp_server_id'] = await Config.get('powerbi.mcp_server_id', None) or None
+
     form_data['metadata'] = metadata
+
+    # Inject the Power BI dataset manifest so the model passes the attached
+    # dataset/workspace ids to Power BI tools instead of asking the user.
+    # Unlike the attached-knowledge manifest this is not gated on native
+    # function calling — it runs before the tool resolution below so the legacy
+    # tool-calling handler sees it too — and it runs before the pre-RAG system
+    # prompt snapshot, so the native tool-call loop re-applies it every round.
+    if powerbi_datasets:
+        from html import escape
+
+        dataset_tags = []
+        for item in powerbi_datasets:
+            if not item.get('id'):
+                continue
+            attrs = f'id="{escape(str(item["id"]), quote=True)}"'
+            for key in ('name', 'workspace_id', 'workspace_name'):
+                if item.get(key):
+                    attrs += f' {key}="{escape(str(item[key]), quote=True)}"'
+            dataset_tags.append(f'<dataset {attrs} />')
+
+        if dataset_tags:
+            form_data['messages'] = add_or_update_system_message(
+                '<attached_powerbi_datasets>\n'
+                + '\n'.join(dataset_tags)
+                + '\n</attached_powerbi_datasets>\n'
+                + '<powerbi_instructions>\n'
+                + 'The user has attached the Power BI dataset(s) above to this conversation. '
+                + 'When answering questions about this data, use the Power BI tools and pass the '
+                + 'dataset id (and workspace id where required) from the attached dataset. Do not '
+                + 'ask the user for a dataset id.\n'
+                + '</powerbi_instructions>',
+                form_data['messages'],
+                append=True,
+            )
 
     # When the caller provides an explicit `tools` key in the request body,
     # skip all server-side tool resolution and pass the caller's tools through
@@ -2896,6 +2945,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                                 },
                                 'callable': tool_function,
                                 'type': 'mcp',
+                                'server_id': server_id,
                                 'client': client,
                                 'direct': False,
                             }
@@ -5681,6 +5731,47 @@ async def streaming_chat_response_handler(response, ctx):
                         direct_tool = tool.get('direct', False)
                         allowed_params = spec.get('parameters', {}).get('properties', {}).keys()
                         params = {key: value for key, value in params.items() if key in allowed_params}
+
+                        # Bind attached Power BI dataset ids server-side: models
+                        # occasionally hallucinate GUIDs, so for tools of the
+                        # configured Power BI MCP server pin the id parameters when
+                        # exactly one dataset is attached, and otherwise reject ids
+                        # that are not among the attached datasets.
+                        powerbi_datasets = metadata.get('powerbi_datasets') or []
+                        if (
+                            powerbi_datasets
+                            and tool_type == 'mcp'
+                            and tool.get('server_id')
+                            and tool.get('server_id') == metadata.get('powerbi_mcp_server_id')
+                        ):
+                            properties = spec.get('parameters', {}).get('properties', {})
+                            dataset_keys = [key for key in ('dataset_id', 'datasetId') if key in properties]
+                            workspace_keys = [
+                                key
+                                for key in ('workspace_id', 'workspaceId', 'group_id', 'groupId')
+                                if key in properties
+                            ]
+                            if len(powerbi_datasets) == 1:
+                                dataset = powerbi_datasets[0]
+                                for key in dataset_keys:
+                                    params[key] = dataset.get('id')
+                                if dataset.get('workspace_id'):
+                                    for key in workspace_keys:
+                                        params[key] = dataset.get('workspace_id')
+                            else:
+                                attached_ids = {dataset.get('id') for dataset in powerbi_datasets}
+                                for key in dataset_keys:
+                                    if params.get(key) and params[key] not in attached_ids:
+                                        return (
+                                            params,
+                                            f'Error: dataset id "{params[key]}" is not one of the Power BI '
+                                            'datasets attached to this chat. Use an id from '
+                                            '<attached_powerbi_datasets>.',
+                                            tool,
+                                            tool_type,
+                                            direct_tool,
+                                        )
+
                         try:
                             if direct_tool:
                                 result = await event_caller(
