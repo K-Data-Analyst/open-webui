@@ -895,6 +895,11 @@ POWERBI_REQUIRE_BUILD_PERMISSION = os.getenv('POWERBI_REQUIRE_BUILD_PERMISSION',
 # principals to use read-only admin APIs). admin_api falls back to probe.
 POWERBI_PERMISSION_SOURCE = os.getenv('POWERBI_PERMISSION_SOURCE', 'probe')
 
+# How long (seconds) to cache Build-permission results per user, in Redis when
+# REDIS_URL is configured (shared across workers) or in-process otherwise.
+# Bounds staleness after permission grants/revocations in Power BI.
+POWERBI_PERMISSION_CACHE_TTL = int(os.getenv('POWERBI_PERMISSION_CACHE_TTL', '900'))
+
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower()
 
@@ -2918,6 +2923,7 @@ DEFAULT_CONFIG = {
     'powerbi.mcp_server_id': POWERBI_MCP_SERVER_ID,
     'powerbi.require_build_permission': POWERBI_REQUIRE_BUILD_PERMISSION,
     'powerbi.permission_source': POWERBI_PERMISSION_SOURCE,
+    'powerbi.permission_cache_ttl': POWERBI_PERMISSION_CACHE_TTL,
     'rag.content_extraction_engine': CONTENT_EXTRACTION_ENGINE,
     'rag.content_extraction.supported_media_mime_types': CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
     'rag.datalab_marker_api_key': DATALAB_MARKER_API_KEY,

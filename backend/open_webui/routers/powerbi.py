@@ -82,50 +82,129 @@ BUILD_PROBE_BODY = {
     'serializerSettings': {'includeNulls': False},
 }
 
+CACHE_KEY_PREFIX = 'open-webui:powerbi'
 
-async def filter_datasets_by_build_permission(items: list[dict], token: str) -> list[dict]:
-    semaphore = asyncio.Semaphore(BUILD_PROBE_CONCURRENCY)
+# In-process fallback for deployments without a centralized cache (REDIS_URL).
+_local_cache: dict = {}
+LOCAL_CACHE_MAX_ENTRIES = 10000
 
-    async with aiohttp.ClientSession(
-        trust_env=True,
-        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-    ) as session:
 
-        async def has_build_permission(dataset_id: str) -> bool:
-            async with semaphore:
-                try:
-                    async with session.post(
-                        f'{POWERBI_API_BASE_URL}/datasets/{dataset_id}/executeQueries',
-                        headers={'Authorization': f'Bearer {token}'},
-                        json=BUILD_PROBE_BODY,
-                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    ) as resp:
-                        # Only 401/403 indicate missing Build permission. Other
-                        # failures (push or live-connection datasets returning
-                        # 400, throttling) say nothing about permissions — keep
-                        # the dataset visible rather than hide it spuriously.
-                        return resp.status not in (401, 403)
-                except Exception as e:
-                    log.debug(f'Power BI Build-permission probe failed for dataset {dataset_id}: {e}')
-                    return True
+async def get_permission_cache_ttl() -> int:
+    try:
+        return int(await Config.get('powerbi.permission_cache_ttl', 900) or 900)
+    except Exception:
+        return 900
 
-        probed = [item for item in items if item.get('id')]
-        results = await asyncio.gather(*(has_build_permission(item['id']) for item in probed))
 
-    return [item for item, has_build in zip(probed, results) if has_build]
+async def permission_cache_get(request: Request, key: str):
+    redis = getattr(request.app.state, 'redis', None)
+    if redis is not None:
+        try:
+            value = await redis.get(key)
+            if value is None:
+                return None
+            if isinstance(value, bytes):
+                value = value.decode('utf-8')
+            return json.loads(value)
+        except Exception as e:
+            log.debug(f'Power BI permission cache get failed for {key}: {e}')
+
+    entry = _local_cache.get(key)
+    if entry and entry[1] > time.time():
+        return entry[0]
+    return None
+
+
+async def permission_cache_set(request: Request, key: str, value, ttl: int):
+    redis = getattr(request.app.state, 'redis', None)
+    if redis is not None:
+        try:
+            await redis.set(key, json.dumps(value), ex=ttl)
+            return
+        except Exception as e:
+            log.debug(f'Power BI permission cache set failed for {key}: {e}')
+
+    if len(_local_cache) >= LOCAL_CACHE_MAX_ENTRIES:
+        now = time.time()
+        for stale_key in [k for k, (_, expires_at) in _local_cache.items() if expires_at <= now]:
+            _local_cache.pop(stale_key, None)
+        if len(_local_cache) >= LOCAL_CACHE_MAX_ENTRIES:
+            _local_cache.clear()
+    _local_cache[key] = (value, time.time() + ttl)
+
+
+async def filter_datasets_by_build_permission(
+    request: Request, user_id: str, items: list[dict], token: str
+) -> list[dict]:
+    ttl = await get_permission_cache_ttl()
+
+    candidates = [item for item in items if item.get('id')]
+    results: dict[str, bool] = {}
+    to_probe: list[str] = []
+
+    for item in candidates:
+        dataset_id = str(item['id']).lower()
+        cached = await permission_cache_get(request, f'{CACHE_KEY_PREFIX}:build:{user_id}:{dataset_id}')
+        if cached is not None:
+            results[dataset_id] = bool(cached)
+        elif dataset_id not in to_probe:
+            to_probe.append(dataset_id)
+
+    if to_probe:
+        semaphore = asyncio.Semaphore(BUILD_PROBE_CONCURRENCY)
+
+        async with aiohttp.ClientSession(
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+        ) as session:
+
+            async def probe(dataset_id: str) -> tuple[bool, bool]:
+                """Returns (has_build, definitive)."""
+                async with semaphore:
+                    try:
+                        async with session.post(
+                            f'{POWERBI_API_BASE_URL}/datasets/{dataset_id}/executeQueries',
+                            headers={'Authorization': f'Bearer {token}'},
+                            json=BUILD_PROBE_BODY,
+                            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                        ) as resp:
+                            # 401/403 → no Build permission. 2xx/400 → Build (400
+                            # covers push/live-connection datasets that cannot
+                            # serve DAX). Anything else (throttling, 5xx) is
+                            # indeterminate: keep the dataset visible but do not
+                            # cache the answer.
+                            if resp.status in (401, 403):
+                                return False, True
+                            if resp.ok or resp.status == 400:
+                                return True, True
+                            return True, False
+                    except Exception as e:
+                        log.debug(f'Power BI Build-permission probe failed for dataset {dataset_id}: {e}')
+                        return True, False
+
+            probe_results = await asyncio.gather(*(probe(dataset_id) for dataset_id in to_probe))
+
+        for dataset_id, (has_build, definitive) in zip(to_probe, probe_results):
+            results[dataset_id] = has_build
+            if definitive:
+                await permission_cache_set(
+                    request,
+                    f'{CACHE_KEY_PREFIX}:build:{user_id}:{dataset_id}',
+                    has_build,
+                    ttl,
+                )
+
+    return [item for item in candidates if results.get(str(item['id']).lower(), True)]
 
 
 FABRIC_API_BASE_URL = 'https://api.fabric.microsoft.com/v1'
 FABRIC_TOKEN_SCOPE = 'https://api.fabric.microsoft.com/.default'
 
-# App-only token for the Power BI AAD app (client credentials flow).
+# App-only token for the Power BI AAD app (client credentials flow). Kept
+# in-process deliberately — re-acquiring it is cheap and the secret-derived
+# token should not sit in a shared cache.
 _sp_token_cache: dict = {}
 _sp_token_lock = asyncio.Lock()
-
-# Per-user Build-capable semantic-model id sets; the admin API is limited to
-# ~200 requests/hour tenant-wide, so cache lookups briefly.
-_user_build_ids_cache: dict = {}
-USER_BUILD_IDS_CACHE_TTL = 300
 
 
 async def get_powerbi_service_principal_token() -> Optional[str]:
@@ -199,20 +278,22 @@ def _entity_has_build_permission(entity: dict) -> bool:
     return any('explore' in p or 'build' in p or 'write' in p for p in permissions)
 
 
-async def get_build_dataset_ids_from_admin_api(user_token: str) -> Optional[set]:
+async def get_build_dataset_ids_from_admin_api(request: Request, user_id: str, user_token: str) -> Optional[set]:
     """
     Return the set of semantic-model ids the user holds Build permission on,
     via the Fabric admin access-entities API, or None when the lookup is
     unavailable (missing credentials, tenant setting off, API error) so the
-    caller can fall back to probing.
+    caller can fall back to probing. The admin API is limited to ~200
+    requests/hour tenant-wide, so results are cached per user.
     """
+    cache_key = f'{CACHE_KEY_PREFIX}:build_ids:{user_id}'
+    cached = await permission_cache_get(request, cache_key)
+    if cached is not None:
+        return {str(dataset_id).lower() for dataset_id in cached}
+
     user_object_id = extract_user_object_id(user_token)
     if not user_object_id:
         return None
-
-    cached = _user_build_ids_cache.get(user_object_id)
-    if cached and cached['expires_at'] > time.time():
-        return cached['ids']
 
     sp_token = await get_powerbi_service_principal_token()
     if not sp_token:
@@ -251,10 +332,7 @@ async def get_build_dataset_ids_from_admin_api(user_token: str) -> Optional[set]
         log.warning(f'Fabric admin access-entities lookup failed: {e}')
         return None
 
-    _user_build_ids_cache[user_object_id] = {
-        'ids': ids,
-        'expires_at': time.time() + USER_BUILD_IDS_CACHE_TTL,
-    }
+    await permission_cache_set(request, cache_key, sorted(ids), await get_permission_cache_ttl())
     return ids
 
 
@@ -371,7 +449,7 @@ async def get_workspace_datasets(
     if items and await Config.get('powerbi.require_build_permission', True):
         build_ids = None
         if (await Config.get('powerbi.permission_source', 'probe') or 'probe') == 'admin_api':
-            build_ids = await get_build_dataset_ids_from_admin_api(token)
+            build_ids = await get_build_dataset_ids_from_admin_api(request, user.id, token)
             if build_ids is None:
                 log.warning(
                     'Fabric admin permission lookup unavailable — falling back to the executeQueries probe'
@@ -380,7 +458,7 @@ async def get_workspace_datasets(
         if build_ids is not None:
             items = [item for item in items if str(item.get('id') or '').lower() in build_ids]
         else:
-            items = await filter_datasets_by_build_permission(items, token)
+            items = await filter_datasets_by_build_permission(request, user.id, items, token)
 
     return {
         'items': items,
