@@ -3634,7 +3634,9 @@
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
+					['doc', 'text', 'note', 'chat', 'folder', 'collection', 'powerbi_dataset'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !isRasterImageContentType(item?.content_type))
 			)
 		);
@@ -4291,7 +4293,9 @@
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
+					['doc', 'text', 'note', 'chat', 'collection', 'folder', 'powerbi_dataset'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !isRasterImageContentType(item?.content_type))
 			)
 		);

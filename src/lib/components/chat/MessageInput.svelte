@@ -2417,6 +2417,7 @@
 									<InputMenu
 										onCompare={openComparison}
 										bind:files
+										bind:selectedToolIds
 										selectedModels={selectedModelIds}
 										fileUploadCapableModels={getFilesystemUploadTerminal(
 											$selectedTerminalId,
