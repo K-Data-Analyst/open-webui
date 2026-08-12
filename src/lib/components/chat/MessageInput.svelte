@@ -2596,6 +2596,7 @@
 										closeOnOutsideClick={inputMenuCloseOnOutsideClick}
 										{chatId}
 										bind:files
+										bind:selectedToolIds
 										selectedModels={selectedModelIds}
 										fileUploadCapableModels={getFilesystemUploadMachine(
 											$selectedMachineId,

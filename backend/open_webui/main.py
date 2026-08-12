@@ -177,6 +177,7 @@ from open_webui.routers import (
     ollama,
     openai,
     pipelines,
+    powerbi,
     prompts,
     retrieval,
     scim,
@@ -278,6 +279,7 @@ from open_webui.utils.oauth import (
     OAuthClientManager,
     OAuthManager,
     apply_connection_oauth_options,
+    build_powerbi_oauth_client_info,
     decrypt_data,
     encrypt_data,
     get_oauth_client_info_with_dynamic_client_registration,
@@ -677,6 +679,16 @@ async def initialize_runtime_config(app: FastAPI):
                         f'{type(e).__name__}: {e}' if str(e) else type(e).__name__,
                     )
 
+    try:
+        powerbi_oauth_client_info = await build_powerbi_oauth_client_info()
+        if powerbi_oauth_client_info:
+            app.state.oauth_client_manager.add_client(
+                'powerbi',
+                OAuthClientInformationFull(**powerbi_oauth_client_info),
+            )
+    except Exception as e:
+        log.error(f'Error adding Power BI OAuth client: {e}')
+
     app.state.EMBEDDING_FUNCTION = None
     app.state.RERANKING_FUNCTION = None
     app.state.ef = None
@@ -868,6 +880,7 @@ if ENABLE_ADMIN_ANALYTICS:
     app.include_router(analytics.router, prefix='/api/v1/analytics', tags=['analytics'])
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(machines.router, prefix='/api/v1/machines', tags=['machines'])
+app.include_router(powerbi.router, prefix='/api/v1/powerbi', tags=['powerbi'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
 app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars'])
 
@@ -2465,6 +2478,7 @@ async def get_app_config(request: Request):
         'users.enable_status',
         'google_drive.enable',
         'onedrive.enable',
+        'powerbi.enable',
         'memories.enable',
         'subagents.enable',
         'ui.default_models',
@@ -2582,6 +2596,7 @@ async def get_app_config(request: Request):
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     'enable_google_drive_integration': config.get('google_drive.enable'),
                     'enable_onedrive_integration': config.get('onedrive.enable'),
+                    'enable_powerbi_integration': config.get('powerbi.enable'),
                     'enable_memories': config.get('memories.enable'),
                     'enable_subagents': config.get('subagents.enable'),
                     **(
