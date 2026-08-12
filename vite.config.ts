@@ -23,7 +23,13 @@ export default defineConfig({
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	server: {
-		port: 3000
+		port: 3000,
+		proxy: {
+			// OAuth login/callback are browser-navigated backend routes; in dev the
+			// backend runs separately on :8080, so forward them to keep redirect
+			// URIs registered against the frontend origin working.
+			'/oauth': 'http://localhost:8080'
+		}
 	},
 	build: {
 		sourcemap: true
