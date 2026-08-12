@@ -11,6 +11,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ChartBar from '$lib/components/icons/ChartBar.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+	import Refresh from '$lib/components/icons/Refresh.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -37,7 +38,7 @@
 		initSelectedWorkspaceDatasets();
 	}
 
-	const initSelectedWorkspaceDatasets = async () => {
+	const initSelectedWorkspaceDatasets = async (refresh = false) => {
 		selectedWorkspaceRequestId += 1;
 		const activeRequestId = selectedWorkspaceRequestId;
 
@@ -49,7 +50,8 @@
 		const res = await searchPowerBIWorkspaceDatasets(
 			localStorage.token,
 			selectedWorkspace.id,
-			query.trim() || null
+			query.trim() || null,
+			refresh
 		).catch(() => {
 			return null;
 		});
@@ -150,6 +152,29 @@
 		window.open(`${WEBUI_BASE_URL}/oauth/clients/powerbi/authorize`, '_self', 'noopener');
 	};
 
+	let refreshing = false;
+
+	const refreshHandler = async () => {
+		if (refreshing) return;
+		refreshing = true;
+
+		try {
+			// Re-fetch the workspace list, keeping the expanded workspace open, and
+			// re-fetch its datasets bypassing the server-side permission cache.
+			requestId += 1;
+			searchedQuery = query;
+			reset();
+			await tick();
+			await getItemsPage(requestId);
+
+			if (selectedWorkspace) {
+				await initSelectedWorkspaceDatasets(true);
+			}
+		} finally {
+			refreshing = false;
+		}
+	};
+
 	const selectDataset = (workspace, dataset) => {
 		onSelect(
 			{
@@ -205,7 +230,25 @@
 		</div>
 	{:else}
 		<div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
-			<SearchInput bind:value={query} placeholder={$i18n.t('Search Workspaces')} />
+			<div class="flex items-center">
+				<div class="min-w-0 flex-1">
+					<SearchInput bind:value={query} placeholder={$i18n.t('Search Workspaces')} />
+				</div>
+
+				<Tooltip content={$i18n.t('Refresh')} placement="top">
+					<button
+						type="button"
+						class="mr-1 p-1 rounded-lg opacity-50 hover:opacity-100 transition disabled:opacity-30 {refreshing
+							? 'animate-spin'
+							: ''}"
+						aria-label={$i18n.t('Refresh')}
+						disabled={refreshing}
+						on:click={refreshHandler}
+					>
+						<Refresh className="size-3.5" />
+					</button>
+				</Tooltip>
+			</div>
 
 			<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
 				{#if items.length === 0 && itemsLoading}
