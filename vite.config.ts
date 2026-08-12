@@ -36,6 +36,7 @@ export default defineConfig({
 		sourcemap: true
 	},
 	server: {
+		port: 3000,
 		proxy: {
 			'/api': {
 				target: backendTarget,
