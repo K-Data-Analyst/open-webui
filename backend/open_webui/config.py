@@ -885,6 +885,10 @@ POWERBI_OAUTH_SCOPE = os.getenv(
 # the server when a dataset is attached and server-side dataset id binding.
 POWERBI_MCP_SERVER_ID = os.getenv('POWERBI_MCP_SERVER_ID', '')
 
+# Only list datasets the user holds Build permission on (probed via
+# executeQueries, since the non-admin API exposes no permission field).
+POWERBI_REQUIRE_BUILD_PERMISSION = os.getenv('POWERBI_REQUIRE_BUILD_PERMISSION', 'True').lower() == 'true'
+
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower()
 
@@ -2906,6 +2910,7 @@ DEFAULT_CONFIG = {
     'powerbi.tenant_id': POWERBI_TENANT_ID,
     'powerbi.oauth_scope': POWERBI_OAUTH_SCOPE,
     'powerbi.mcp_server_id': POWERBI_MCP_SERVER_ID,
+    'powerbi.require_build_permission': POWERBI_REQUIRE_BUILD_PERMISSION,
     'rag.content_extraction_engine': CONTENT_EXTRACTION_ENGINE,
     'rag.content_extraction.supported_media_mime_types': CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
     'rag.datalab_marker_api_key': DATALAB_MARKER_API_KEY,
