@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -66,6 +67,49 @@ async def powerbi_api_get(path: str, token: str, params: Optional[dict] = None) 
                 status_code=resp.status,
                 detail='Power BI API request failed',
             )
+
+
+BUILD_PROBE_CONCURRENCY = 8
+
+# The non-admin Power BI API exposes no "my permission on this dataset" field,
+# but executeQueries is gated on exactly Build permission — probing it with a
+# trivial query tells us whether the user can actually query the dataset.
+BUILD_PROBE_BODY = {
+    'queries': [{'query': 'EVALUATE ROW("probe", 1)'}],
+    'serializerSettings': {'includeNulls': False},
+}
+
+
+async def filter_datasets_by_build_permission(items: list[dict], token: str) -> list[dict]:
+    semaphore = asyncio.Semaphore(BUILD_PROBE_CONCURRENCY)
+
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+    ) as session:
+
+        async def has_build_permission(dataset_id: str) -> bool:
+            async with semaphore:
+                try:
+                    async with session.post(
+                        f'{POWERBI_API_BASE_URL}/datasets/{dataset_id}/executeQueries',
+                        headers={'Authorization': f'Bearer {token}'},
+                        json=BUILD_PROBE_BODY,
+                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    ) as resp:
+                        # Only 401/403 indicate missing Build permission. Other
+                        # failures (push or live-connection datasets returning
+                        # 400, throttling) say nothing about permissions — keep
+                        # the dataset visible rather than hide it spuriously.
+                        return resp.status not in (401, 403)
+                except Exception as e:
+                    log.debug(f'Power BI Build-permission probe failed for dataset {dataset_id}: {e}')
+                    return True
+
+        probed = [item for item in items if item.get('id')]
+        results = await asyncio.gather(*(has_build_permission(item['id']) for item in probed))
+
+    return [item for item, has_build in zip(probed, results) if has_build]
 
 
 @router.get('/status')
@@ -177,6 +221,9 @@ async def get_workspace_datasets(
     query = (query or '').strip().lower()
     if query:
         items = [item for item in items if query in (item.get('name') or '').lower()]
+
+    if items and await Config.get('powerbi.require_build_permission', True):
+        items = await filter_datasets_by_build_permission(items, token)
 
     return {
         'items': items,
