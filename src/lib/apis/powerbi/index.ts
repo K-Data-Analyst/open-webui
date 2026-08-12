@@ -71,13 +71,17 @@ export const searchPowerBIWorkspaces = async (
 export const searchPowerBIWorkspaceDatasets = async (
 	token: string,
 	workspaceId: string,
-	query: string | null = null
+	query: string | null = null,
+	refresh: boolean = false
 ) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
 	if (query) {
 		searchParams.append('query', query);
+	}
+	if (refresh) {
+		searchParams.append('refresh', 'true');
 	}
 
 	const res = await fetch(
