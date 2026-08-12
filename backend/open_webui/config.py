@@ -889,12 +889,6 @@ POWERBI_MCP_SERVER_ID = os.getenv('POWERBI_MCP_SERVER_ID', '')
 # executeQueries, since the non-admin API exposes no permission field).
 POWERBI_REQUIRE_BUILD_PERMISSION = os.getenv('POWERBI_REQUIRE_BUILD_PERMISSION', 'True').lower() == 'true'
 
-# How to determine Build permission: 'probe' (executeQueries as the user) or
-# 'admin_api' (Fabric admin access-entities lookup using the Power BI client
-# credentials app-only; requires the tenant setting allowing service
-# principals to use read-only admin APIs). admin_api falls back to probe.
-POWERBI_PERMISSION_SOURCE = os.getenv('POWERBI_PERMISSION_SOURCE', 'probe')
-
 # How long (seconds) to cache Build-permission results per user, in Redis when
 # REDIS_URL is configured (shared across workers) or in-process otherwise.
 # Bounds staleness after permission grants/revocations in Power BI.
@@ -2922,7 +2916,6 @@ DEFAULT_CONFIG = {
     'powerbi.oauth_scope': POWERBI_OAUTH_SCOPE,
     'powerbi.mcp_server_id': POWERBI_MCP_SERVER_ID,
     'powerbi.require_build_permission': POWERBI_REQUIRE_BUILD_PERMISSION,
-    'powerbi.permission_source': POWERBI_PERMISSION_SOURCE,
     'powerbi.permission_cache_ttl': POWERBI_PERMISSION_CACHE_TTL,
     'rag.content_extraction_engine': CONTENT_EXTRACTION_ENGINE,
     'rag.content_extraction.supported_media_mime_types': CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
