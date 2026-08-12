@@ -34,7 +34,6 @@ BASE_DIR = BACKEND_DIR.parent
 
 try:
     from dotenv import find_dotenv, load_dotenv
-
     load_dotenv(find_dotenv(str(BASE_DIR / '.env')))
 except ImportError:
     print('dotenv not installed, skipping...')
