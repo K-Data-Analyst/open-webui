@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import re
@@ -197,145 +196,6 @@ async def filter_datasets_by_build_permission(
     return [item for item in candidates if results.get(str(item['id']).lower(), True)]
 
 
-FABRIC_API_BASE_URL = 'https://api.fabric.microsoft.com/v1'
-FABRIC_TOKEN_SCOPE = 'https://api.fabric.microsoft.com/.default'
-
-# App-only token for the Power BI AAD app (client credentials flow). Kept
-# in-process deliberately — re-acquiring it is cheap and the secret-derived
-# token should not sit in a shared cache.
-_sp_token_cache: dict = {}
-_sp_token_lock = asyncio.Lock()
-
-
-async def get_powerbi_service_principal_token() -> Optional[str]:
-    config = await Config.get_many('powerbi.client_id', 'powerbi.client_secret', 'powerbi.tenant_id')
-    client_id = config.get('powerbi.client_id')
-    client_secret = config.get('powerbi.client_secret')
-    tenant_id = config.get('powerbi.tenant_id')
-    if not (client_id and client_secret and tenant_id):
-        return None
-
-    cache_key = (tenant_id, client_id)
-    async with _sp_token_lock:
-        cached = _sp_token_cache.get(cache_key)
-        if cached and cached['expires_at'] > time.time() + 60:
-            return cached['token']
-
-        try:
-            async with aiohttp.ClientSession(
-                trust_env=True,
-                timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-            ) as session:
-                async with session.post(
-                    f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token',
-                    data={
-                        'grant_type': 'client_credentials',
-                        'client_id': client_id,
-                        'client_secret': client_secret,
-                        'scope': FABRIC_TOKEN_SCOPE,
-                    },
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as resp:
-                    if not resp.ok:
-                        log.warning(f'Power BI service principal token request failed: {resp.status}')
-                        return None
-                    token_response = await resp.json()
-        except Exception as e:
-            log.warning(f'Power BI service principal token request failed: {e}')
-            return None
-
-        access_token = token_response.get('access_token')
-        if not access_token:
-            return None
-
-        _sp_token_cache[cache_key] = {
-            'token': access_token,
-            'expires_at': time.time() + int(token_response.get('expires_in', 3600)),
-        }
-        return access_token
-
-
-def extract_user_object_id(access_token: str) -> Optional[str]:
-    """Read the AAD object id (oid claim) from the user's access token.
-
-    The OIDC 'sub' claim is app-pairwise and must not be used as a directory
-    user id; oid is the stable directory object id the admin API expects.
-    """
-    try:
-        payload_b64 = access_token.split('.')[1]
-        payload_b64 += '=' * (-len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        return payload.get('oid')
-    except Exception:
-        return None
-
-
-def _entity_has_build_permission(entity: dict) -> bool:
-    details = entity.get('itemAccessDetails') or {}
-    permissions = [str(p).lower() for p in (details.get('permissions') or entity.get('permissions') or [])]
-    # For semantic models Build surfaces as Explore; Write (workspace
-    # admin/member/contributor) implies it.
-    return any('explore' in p or 'build' in p or 'write' in p for p in permissions)
-
-
-async def get_build_dataset_ids_from_admin_api(request: Request, user_id: str, user_token: str) -> Optional[set]:
-    """
-    Return the set of semantic-model ids the user holds Build permission on,
-    via the Fabric admin access-entities API, or None when the lookup is
-    unavailable (missing credentials, tenant setting off, API error) so the
-    caller can fall back to probing. The admin API is limited to ~200
-    requests/hour tenant-wide, so results are cached per user.
-    """
-    cache_key = f'{CACHE_KEY_PREFIX}:build_ids:{user_id}'
-    cached = await permission_cache_get(request, cache_key)
-    if cached is not None:
-        return {str(dataset_id).lower() for dataset_id in cached}
-
-    user_object_id = extract_user_object_id(user_token)
-    if not user_object_id:
-        return None
-
-    sp_token = await get_powerbi_service_principal_token()
-    if not sp_token:
-        return None
-
-    ids = set()
-    url = f'{FABRIC_API_BASE_URL}/admin/users/{user_object_id}/access'
-    params = {'type': 'SemanticModel'}
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        ) as session:
-            while url:
-                async with session.get(
-                    url,
-                    headers={'Authorization': f'Bearer {sp_token}'},
-                    params=params,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as resp:
-                    if not resp.ok:
-                        log.warning(
-                            f'Fabric admin access-entities lookup failed: {resp.status} - {await resp.text()}'
-                        )
-                        return None
-                    body = await resp.json()
-
-                for entity in body.get('accessEntities') or body.get('value') or []:
-                    if entity.get('id') and _entity_has_build_permission(entity):
-                        ids.add(str(entity['id']).lower())
-
-                url = body.get('continuationUri')
-                params = None
-    except Exception as e:
-        log.warning(f'Fabric admin access-entities lookup failed: {e}')
-        return None
-
-    await permission_cache_set(request, cache_key, sorted(ids), await get_permission_cache_ttl())
-    return ids
-
-
 @router.get('/status')
 async def get_status(request: Request, user=Depends(get_verified_user)):
     """
@@ -447,18 +307,7 @@ async def get_workspace_datasets(
         items = [item for item in items if query in (item.get('name') or '').lower()]
 
     if items and await Config.get('powerbi.require_build_permission', True):
-        build_ids = None
-        if (await Config.get('powerbi.permission_source', 'probe') or 'probe') == 'admin_api':
-            build_ids = await get_build_dataset_ids_from_admin_api(request, user.id, token)
-            if build_ids is None:
-                log.warning(
-                    'Fabric admin permission lookup unavailable — falling back to the executeQueries probe'
-                )
-
-        if build_ids is not None:
-            items = [item for item in items if str(item.get('id') or '').lower() in build_ids]
-        else:
-            items = await filter_datasets_by_build_permission(request, user.id, items, token)
+        items = await filter_datasets_by_build_permission(request, user.id, items, token)
 
     return {
         'items': items,
