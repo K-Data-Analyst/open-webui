@@ -67,3 +67,12 @@ jobs:
           git tag -a "$tag" -m "Release $tag"
           git push origin "refs/tags/${tag}"
           echo "::notice::Created tag ${tag}"
+      - name: Trigger docker build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          gh workflow run docker-build.yml --ref "$tag"
+          echo "::notice::Dispatched docker build for ${tag}"

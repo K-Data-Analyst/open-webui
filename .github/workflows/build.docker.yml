@@ -1,9 +1,7 @@
 name: build the docker image
 run-name: ${{ github.actor }} is building the docker image
 on:
-  push:
-    tags:
-      - 'k.v*'
+  workflow_dispatch:
 
 
 
@@ -25,7 +23,7 @@ jobs:
             free_disk: false
     steps:
     - name: checkout repo
-      uses: actions/checkout@v2.3.4
+      uses: actions/checkout@v4
     - name: Prepare CI Dockerfile
       run: |
         awk '
@@ -38,7 +36,7 @@ jobs:
         ' Dockerfile > "${RUNNER_TEMP}/Dockerfile"
     - uses: azure/docker-login@v1
       with:
-        login-server: komardata.azurecr.io
+        login-server: komardataapps.azurecr.io
         username: ${{ secrets.AZURE_CONTAINER_USER }}
         password: ${{ secrets.AZURE_CONTAINER_PASSWORD }}
     - name: Build Docker image
