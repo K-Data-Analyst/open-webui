@@ -1,0 +1,59 @@
+name: build the docker image
+run-name: ${{ github.actor }} is building the docker image
+on:
+  push:
+    tags:
+      - k.v*
+    paths-ignore:
+      - ../../../Makefile
+      - chart/**
+      - .vscode/**
+      - ../../../..
+
+
+jobs:
+
+  build_base_and_prod:
+    name: build base and image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: linux/amd64
+            runner: ubuntu-latest
+        variant:
+          - name: main
+            suffix: ""
+            build_args: ""
+            free_disk: false
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@v2.3.4
+    - name: Prepare CI Dockerfile
+      run: |
+        awk '
+          /^FROM --platform=\$BUILDPLATFORM node:/ {
+            print
+            print "ENV NODE_OPTIONS=\"--max-old-space-size=12288\""
+            next
+          }
+          { print }
+        ' Dockerfile > "${RUNNER_TEMP}/Dockerfile"
+    - uses: azure/docker-login@v1
+      with:
+        login-server: komardata.azurecr.io
+        username: ${{ secrets.AZURE_CONTAINER_USER }}
+        password: ${{ secrets.AZURE_CONTAINER_PASSWORD }}
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      id: build
+      with:
+        context: .
+        file: ${{ runner.temp }}/Dockerfile
+        push: true
+        platforms: ${{ matrix.platform.arch }}
+        tags: "komardataapps.azurecr.io/ai/openwebui:${{ github.ref_name }}"
+        build-args: |
+          BUILD_HASH=${{ github.sha }}
+          ${{ matrix.variant.build_args }}
