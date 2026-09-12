@@ -74,5 +74,5 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
-          gh workflow run docker-build.yml --ref "$tag"
+          gh workflow run build.docker.yml --ref "$tag"
           echo "::notice::Dispatched docker build for ${tag}"
