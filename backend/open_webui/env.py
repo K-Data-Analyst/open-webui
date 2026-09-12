@@ -1274,3 +1274,32 @@ OTEL_METRICS_OTLP_SPAN_EXPORTER = os.getenv(
 OTEL_LOGS_OTLP_SPAN_EXPORTER = os.getenv(
     'OTEL_LOGS_OTLP_SPAN_EXPORTER', OTEL_OTLP_SPAN_EXPORTER
 ).lower()  # grpc or http
+
+# GenAI (LLM call) spans emitted by the OpenAI-compatible proxy.
+# Requires ENABLE_OTEL and ENABLE_OTEL_TRACES; see docs/OpenLITLayerC.md.
+ENABLE_OTEL_GENAI = os.getenv('ENABLE_OTEL_GENAI', 'True').lower() == 'true'
+OTEL_GENAI_ENVIRONMENT = os.getenv('OTEL_GENAI_ENVIRONMENT', 'default')
+# Include user.email / user.full_name on GenAI spans (user.id and user.roles are always included).
+OTEL_GENAI_CAPTURE_USER_PII = os.getenv('OTEL_GENAI_CAPTURE_USER_PII', 'True').lower() == 'true'
+# Opt-in content on GenAI spans (gen_ai.input.messages / gen_ai.output.messages /
+# gen_ai.system_instructions / gen_ai.tool.definitions / gen_ai.tool.call.arguments|result):
+#   off   - none of it
+#   tools - structured messages with tool_call / tool_call_response parts only (names and ids,
+#           no arguments, results or text); tool names only in gen_ai.tool.definitions  [default]
+#   full  - everything (prompts contain user data; this fork also injects Power BI dataset ids)
+# Legacy true/false values map to full/off.
+OTEL_GENAI_CAPTURE_CONTENT = os.getenv('OTEL_GENAI_CAPTURE_CONTENT', 'tools').strip().lower()
+OTEL_GENAI_CAPTURE_CONTENT = {'true': 'full', '1': 'full', 'false': 'off', '0': 'off'}.get(
+    OTEL_GENAI_CAPTURE_CONTENT, OTEL_GENAI_CAPTURE_CONTENT
+)
+if OTEL_GENAI_CAPTURE_CONTENT not in ('off', 'tools', 'full'):
+    OTEL_GENAI_CAPTURE_CONTENT = 'tools'
+# Pricing for gen_ai.usage.cost, modelled on the OpenLIT Go SDK config:
+#   OTEL_GENAI_PRICING_JSON   = pricing endpoint URL or local file (like PricingEndpoint). Accepts the
+#                               Go SDK endpoint shape {"data": {model: {"input", "output"}}} (per token),
+#                               a flat {model: {"input", "output"}} map (per token), or OpenLIT's
+#                               assets/pricing.json (per 1K tokens). Leave empty to skip fetching.
+#   OTEL_GENAI_PRICING_CUSTOM = inline JSON or file of per-token overrides (like PricingInfo);
+#                               entries here always win over the endpoint table.
+OTEL_GENAI_PRICING_JSON = os.getenv('OTEL_GENAI_PRICING_JSON', '')
+OTEL_GENAI_PRICING_CUSTOM = os.getenv('OTEL_GENAI_PRICING_CUSTOM', '')

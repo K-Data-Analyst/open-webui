@@ -386,6 +386,9 @@ async def get_current_user(
 
         # Scope-backed, so outer middleware (audit) can reuse the resolved user
         request.state.user = user
+        # How the caller authenticated; consumed by LLM spans (utils/telemetry/genai.py).
+        # Never store the key or token itself here.
+        request.state.auth = {'type': 'api_key'}
         return user
 
     # auth by jwt token
@@ -437,6 +440,14 @@ async def get_current_user(
 
             # Scope-backed, so outer middleware (audit) can reuse the resolved user
             request.state.user = user
+            # How the caller authenticated; consumed by LLM spans (utils/telemetry/genai.py).
+            # Only non-secret claims are kept.
+            request.state.auth = {
+                'type': 'jwt',
+                'jti': data.get('jti'),
+                'iat': data.get('iat'),
+                'exp': data.get('exp'),
+            }
             return user
         else:
             raise HTTPException(

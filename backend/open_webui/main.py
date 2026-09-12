@@ -391,6 +391,13 @@ async def lifespan(app: FastAPI):
     app.state.periodic_usage_pool_cleanup = asyncio.create_task(periodic_usage_pool_cleanup())
     app.state.periodic_session_pool_cleanup = asyncio.create_task(periodic_session_pool_cleanup())
 
+    if ENABLE_OTEL:
+        # Pricing for gen_ai.usage.cost on LLM spans (docs/OpenLITLayerC.md); no-op unless
+        # OTEL_GENAI_PRICING_JSON / OTEL_GENAI_PRICING_CUSTOM are set, and failures only log.
+        from open_webui.utils.telemetry.genai import load_pricing_table
+
+        await load_pricing_table()
+
     from open_webui.utils.automations import scheduler_worker_loop
 
     app.state.scheduler_worker_loop = asyncio.create_task(scheduler_worker_loop(app))

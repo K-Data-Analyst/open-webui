@@ -60,8 +60,10 @@ class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
         self.exit_stack = None
+        self.url: str | None = None  # server URL, read by telemetry (utils/telemetry/genai.py)
 
     async def connect(self, url: str, headers: Optional[dict] = None):
+        self.url = url
         async with AsyncExitStack() as exit_stack:
             try:
                 self._streams_context = streamablehttp_client(

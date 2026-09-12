@@ -56,6 +56,17 @@ from open_webui.utils.session_pool import (
     get_session,
     stream_wrapper,
 )
+from open_webui.utils.telemetry.genai import (
+    API_TYPE_CHAT,
+    API_TYPE_EMBEDDINGS,
+    API_TYPE_RESPONSES,
+    OPERATION_CHAT,
+    OPERATION_EMBEDDINGS,
+    end_span,
+    record_response,
+    start_llm_span,
+    use_span,
+)
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1612,6 +1623,21 @@ async def generate_chat_completion(
     if not is_streaming_request:
         payload.pop('stream_options', None)
 
+    # GenAI span for this upstream call (no-op unless OTel tracing is on).
+    # Started before the payload is serialized so request params are readable.
+    llm_span = start_llm_span(
+        operation=OPERATION_CHAT,
+        requested_model=requested_model,
+        request_url=request_url,
+        api_config=api_config,
+        payload=payload,
+        user=user,
+        metadata=metadata,
+        request=request,
+        openwebui_model_id=form_data.get('model'),
+        api_type=API_TYPE_RESPONSES if is_responses else API_TYPE_CHAT,
+    )
+
     payload = JSONCodec.dumps(payload)
 
     r = None
@@ -1621,15 +1647,17 @@ async def generate_chat_completion(
     try:
         session = await get_session()
 
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=is_streaming_request),
-        )
+        # use_span keeps the aiohttp client span nested under the GenAI span.
+        with use_span(llm_span):
+            r = await session.request(
+                method='POST',
+                url=request_url,
+                data=payload,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=get_client_timeout(stream=is_streaming_request),
+            )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
@@ -1638,6 +1666,7 @@ async def generate_chat_completion(
             # streaming the error back (which hides the error from logs).
             if r.status >= 400:
                 error_body = await r.text()
+                end_span(llm_span, status=r.status)
                 log.error(
                     'Provider returned HTTP %d with SSE content-type: %s',
                     r.status,
@@ -1673,8 +1702,13 @@ async def generate_chat_completion(
                     )
 
             streaming = True
+            # The traced stream owns the span from here: it ends it when the
+            # upstream stream finishes, fails, or the client disconnects.
+            stream = stream_wrapper(r)
+            if llm_span is not None:
+                stream = llm_span.traced_stream(stream)
             return StreamingResponse(
-                stream_wrapper(r),
+                stream,
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
@@ -1684,6 +1718,9 @@ async def generate_chat_completion(
             except Exception as e:
                 log.error(e)
                 response = await r.text()
+
+            record_response(llm_span, response)
+            end_span(llm_span, status=r.status)
 
             if r.status >= 400:
                 await publish_model_provider_request_failed(
@@ -1708,6 +1745,7 @@ async def generate_chat_completion(
             return response
     except Exception as e:
         log.exception(e)
+        end_span(llm_span, status=r.status if r else None, error=e)
 
         raise HTTPException(
             status_code=r.status if r else 500,
@@ -1716,6 +1754,7 @@ async def generate_chat_completion(
     finally:
         if not streaming:
             await cleanup_response(r)
+            end_span(llm_span)  # safety net for any early return above; no-op if already ended
 
 
 async def embeddings(request: Request, form_data: dict, user):
@@ -1771,20 +1810,35 @@ async def embeddings(request: Request, form_data: dict, user):
         embeddings_url = f'{url}/embeddings'
     requested_model = form_data.get('model')
 
+    llm_span = start_llm_span(
+        operation=OPERATION_EMBEDDINGS,
+        requested_model=requested_model,
+        request_url=embeddings_url,
+        api_config=api_config,
+        payload=form_data,
+        user=user,
+        request=request,
+        openwebui_model_id=model_id,
+        api_type=API_TYPE_EMBEDDINGS,
+    )
+
     try:
         session = await get_session()
-        r = await session.request(
-            method='POST',
-            url=embeddings_url,
-            data=body,
-            headers=headers,
-            cookies=cookies,
-            timeout=get_client_timeout(),
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        )
+        with use_span(llm_span):
+            r = await session.request(
+                method='POST',
+                url=embeddings_url,
+                data=body,
+                headers=headers,
+                cookies=cookies,
+                timeout=get_client_timeout(),
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            )
 
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
+            # Embedding streams are not parsed; record the status and end the span now.
+            end_span(llm_span, status=r.status)
             return StreamingResponse(
                 stream_wrapper(r, passthrough=True),
                 status_code=r.status,
@@ -1795,6 +1849,9 @@ async def embeddings(request: Request, form_data: dict, user):
                 response_data = await r.json(loads=JSONCodec.loads)
             except Exception:
                 response_data = await r.text()
+
+            record_response(llm_span, response_data)
+            end_span(llm_span, status=r.status)
 
             if r.status >= 400:
                 await publish_model_provider_request_failed(
@@ -1815,6 +1872,7 @@ async def embeddings(request: Request, form_data: dict, user):
             return response_data
     except Exception as e:
         log.exception(e)
+        end_span(llm_span, status=r.status if r else None, error=e)
         raise HTTPException(
             status_code=r.status if r else 500,
             detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
@@ -1822,6 +1880,7 @@ async def embeddings(request: Request, form_data: dict, user):
     finally:
         if not streaming:
             await cleanup_response(r)
+        end_span(llm_span)  # safety net; no-op if already ended
 
 
 class ResponsesForm(BaseModel):
@@ -1878,6 +1937,7 @@ async def responses(
 
     r = None
     streaming = False
+    llm_span = None
 
     try:
         headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
@@ -1899,22 +1959,40 @@ async def responses(
         else:
             request_url = f'{url}/responses'
 
-        session = await get_session()
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=body,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=is_streaming_request),
+        llm_span = start_llm_span(
+            operation=OPERATION_CHAT,
+            requested_model=payload.get('model'),
+            request_url=request_url,
+            api_config=api_config,
+            payload=payload,
+            user=user,
+            request=request,
+            openwebui_model_id=model_id,
+            api_type=API_TYPE_RESPONSES,
         )
+
+        session = await get_session()
+        with use_span(llm_span):
+            r = await session.request(
+                method='POST',
+                url=request_url,
+                data=body,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=get_client_timeout(stream=is_streaming_request),
+            )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
+            if llm_span is not None:
+                # Line mode so the response.completed event (usage) can be read.
+                stream = llm_span.traced_stream(stream_wrapper(r))
+            else:
+                stream = stream_wrapper(r, passthrough=True)
             return StreamingResponse(
-                stream_wrapper(r, passthrough=True),
+                stream,
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
@@ -1923,6 +2001,9 @@ async def responses(
                 response_data = await r.json(loads=JSONCodec.loads)
             except Exception:
                 response_data = await r.text()
+
+            record_response(llm_span, response_data)
+            end_span(llm_span, status=r.status)
 
             if r.status >= 400:
                 await publish_model_provider_request_failed(
@@ -1946,6 +2027,7 @@ async def responses(
         raise
     except Exception as e:
         log.exception(e)
+        end_span(llm_span, status=r.status if r else None, error=e)
         raise HTTPException(
             status_code=r.status if r else 500,
             detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
@@ -1953,6 +2035,7 @@ async def responses(
     finally:
         if not streaming:
             await cleanup_response(r)
+            end_span(llm_span)  # safety net; no-op if already ended
 
 
 @router.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE'])

@@ -100,6 +100,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.telemetry.genai import end_tool_span, start_tool_span, use_span
 from open_webui.utils.memory import add_memory_context, review_memory_after_turn
 from open_webui.utils.misc import (
     add_or_update_system_message,
@@ -1381,6 +1382,7 @@ async def chat_completion_tools_handler(
                 tool = None
                 tool_type = ''
                 direct_tool = False
+                tool_span = None
 
                 try:
                     tool = tools[tool_function_name]
@@ -1391,25 +1393,37 @@ async def chat_completion_tools_handler(
                     allowed_params = spec.get('parameters', {}).get('properties', {}).keys()
                     tool_function_params = {k: v for k, v in tool_function_params.items() if k in allowed_params}
 
-                    if tool.get('direct', False):
-                        tool_result = await event_caller(
-                            {
-                                'type': 'execute:tool',
-                                'data': {
-                                    'id': str(uuid4()),
-                                    'name': tool_function_name,
-                                    'params': tool_function_params,
-                                    'server': tool.get('server', {}),
-                                    'session_id': metadata.get('session_id', None),
-                                },
-                            }
-                        )
-                    else:
-                        tool_function = tool['callable']
-                        tool_result = await tool_function(**tool_function_params)
+                    # execute_tool span (OTel GenAI semconv); no-op unless tracing is on.
+                    tool_span = start_tool_span(
+                        tool_call={'name': tool_function_name},
+                        tool=tool,
+                        arguments=tool_function_params,
+                        metadata=metadata,
+                        user=user,
+                        request=request,
+                    )
+                    with use_span(tool_span):
+                        if tool.get('direct', False):
+                            tool_result = await event_caller(
+                                {
+                                    'type': 'execute:tool',
+                                    'data': {
+                                        'id': str(uuid4()),
+                                        'name': tool_function_name,
+                                        'params': tool_function_params,
+                                        'server': tool.get('server', {}),
+                                        'session_id': metadata.get('session_id', None),
+                                    },
+                                }
+                            )
+                        else:
+                            tool_function = tool['callable']
+                            tool_result = await tool_function(**tool_function_params)
 
                 except Exception as e:
                     tool_result = {'error': str(e)}
+                    end_tool_span(tool_span, error=e)
+                end_tool_span(tool_span, result=tool_result)
 
                 tool_result, tool_result_files, tool_result_embeds = await process_tool_result(
                     request,
@@ -3224,6 +3238,7 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
 
     tool = tools.get(name)
     if not tool:
+        start_tool_span(tool_call=tool_call, tool=None, metadata=metadata, user=user, request=request)
         return {'tool_call_id': tool_call.get('id', ''), 'content': f'Error: Tool "{name}" not found.'}
 
     spec = tool.get('spec', {})
@@ -3232,34 +3247,41 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
     allowed_params = spec.get('parameters', {}).get('properties', {}).keys()
     params = {key: value for key, value in params.items() if key in allowed_params}
 
+    # execute_tool span (OTel GenAI semconv); no-op unless tracing is on.
+    tool_span = start_tool_span(
+        tool_call=tool_call, tool=tool, arguments=params, metadata=metadata, user=user, request=request
+    )
     try:
-        if direct_tool:
-            if not event_caller:
-                result = 'Error: Browser session is not connected for this direct tool.'
+        with use_span(tool_span):
+            if direct_tool:
+                if not event_caller:
+                    result = 'Error: Browser session is not connected for this direct tool.'
+                else:
+                    result = await event_caller(
+                        {
+                            'type': 'execute:tool',
+                            'data': {
+                                'id': str(uuid4()),
+                                'name': name,
+                                'params': params,
+                                'server': tool.get('server', {}),
+                                'session_id': metadata.get('session_id'),
+                            },
+                        }
+                    )
             else:
-                result = await event_caller(
-                    {
-                        'type': 'execute:tool',
-                        'data': {
-                            'id': str(uuid4()),
-                            'name': name,
-                            'params': params,
-                            'server': tool.get('server', {}),
-                            'session_id': metadata.get('session_id'),
-                        },
-                    }
+                function = await get_updated_tool_function(
+                    function=tool['callable'],
+                    extra_params={
+                        '__messages__': form_data.get('messages', []),
+                        '__files__': metadata.get('files', []),
+                    },
                 )
-        else:
-            function = await get_updated_tool_function(
-                function=tool['callable'],
-                extra_params={
-                    '__messages__': form_data.get('messages', []),
-                    '__files__': metadata.get('files', []),
-                },
-            )
-            result = await function(**params)
+                result = await function(**params)
     except Exception as e:
         result = {'error': str(e)}
+        end_tool_span(tool_span, error=e)
+    end_tool_span(tool_span, result=result)
 
     terminal_file_result = build_terminal_file_tool_result(name, params, result, tool, metadata)
     if terminal_file_result:
@@ -5725,6 +5747,9 @@ async def streaming_chat_response_handler(response, ctx):
                             return {}, None, None, None, False
                         tool = tools.get(name)
                         if not tool:
+                            start_tool_span(
+                                tool_call=tool_call, tool=None, metadata=metadata, user=user, request=request
+                            )
                             return params, f'Error: Tool "{name}" not found.', None, None, False
                         spec = tool.get('spec', {})
                         tool_type = tool.get('type', '')
@@ -5762,41 +5787,61 @@ async def streaming_chat_response_handler(response, ctx):
                                 attached_ids = {dataset.get('id') for dataset in powerbi_datasets}
                                 for key in dataset_keys:
                                     if params.get(key) and params[key] not in attached_ids:
-                                        return (
-                                            params,
+                                        rejection = (
                                             f'Error: dataset id "{params[key]}" is not one of the Power BI '
                                             'datasets attached to this chat. Use an id from '
-                                            '<attached_powerbi_datasets>.',
-                                            tool,
-                                            tool_type,
-                                            direct_tool,
+                                            '<attached_powerbi_datasets>.'
                                         )
+                                        end_tool_span(
+                                            start_tool_span(
+                                                tool_call=tool_call,
+                                                tool=tool,
+                                                arguments=params,
+                                                metadata=metadata,
+                                                user=user,
+                                                request=request,
+                                            ),
+                                            result=rejection,
+                                        )
+                                        return params, rejection, tool, tool_type, direct_tool
 
+                        # execute_tool span (OTel GenAI semconv); no-op unless tracing is on.
+                        tool_span = start_tool_span(
+                            tool_call=tool_call,
+                            tool=tool,
+                            arguments=params,
+                            metadata=metadata,
+                            user=user,
+                            request=request,
+                        )
                         try:
-                            if direct_tool:
-                                result = await event_caller(
-                                    {
-                                        'type': 'execute:tool',
-                                        'data': {
-                                            'id': str(uuid4()),
-                                            'name': name,
-                                            'params': params,
-                                            'server': tool.get('server', {}),
-                                            'session_id': metadata.get('session_id'),
+                            with use_span(tool_span):
+                                if direct_tool:
+                                    result = await event_caller(
+                                        {
+                                            'type': 'execute:tool',
+                                            'data': {
+                                                'id': str(uuid4()),
+                                                'name': name,
+                                                'params': params,
+                                                'server': tool.get('server', {}),
+                                                'session_id': metadata.get('session_id'),
+                                            },
+                                        }
+                                    )
+                                else:
+                                    function = await get_updated_tool_function(
+                                        function=tool['callable'],
+                                        extra_params={
+                                            '__messages__': form_data.get('messages', []),
+                                            '__files__': metadata.get('files', []),
                                         },
-                                    }
-                                )
-                            else:
-                                function = await get_updated_tool_function(
-                                    function=tool['callable'],
-                                    extra_params={
-                                        '__messages__': form_data.get('messages', []),
-                                        '__files__': metadata.get('files', []),
-                                    },
-                                )
-                                result = await function(**params)
+                                    )
+                                    result = await function(**params)
                         except Exception as e:
                             result = {'error': str(e)}
+                            end_tool_span(tool_span, error=e)
+                        end_tool_span(tool_span, result=result)
                         return params, result, tool, tool_type, direct_tool
 
                     delegate_calls = [
