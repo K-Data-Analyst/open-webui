@@ -3,12 +3,8 @@ run-name: ${{ github.actor }} is building the docker image
 on:
   push:
     tags:
-      - k.v*
-    paths-ignore:
-      - ../../../Makefile
-      - chart/**
-      - .vscode/**
-      - ../../../..
+      - 'k.v*'
+
 
 
 jobs:
