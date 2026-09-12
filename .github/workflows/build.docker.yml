@@ -4,14 +4,16 @@ on:
   workflow_dispatch:
 
 
-permissions:
-  id-token: write
-  contents: read
+
 jobs:
 
   build_base_and_prod:
     name: build base and image
     runs-on: ubuntu-latest
+    environment: production      # <- this is what changes the sub claim
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
