@@ -1,5 +1,5 @@
 name: build the docker image
-run-name: ${{ github.actor }} is building the docker image
+run-name: ${{ github.actor }} is building the chat docker image
 on:
   workflow_dispatch:
 
