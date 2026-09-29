@@ -122,6 +122,7 @@ from open_webui.utils.plugin import (
     load_tool_module_by_id,
     set_tool_module_in_cache,
 )
+from open_webui.utils.powerbi import get_powerbi_mcp_oauth_token
 from open_webui.utils.terminals import (
     TERMINAL_CONTEXT_HEADER,
     get_terminal_server_url,
@@ -172,6 +173,9 @@ async def build_tool_server_headers(
             oauth_token = await request.app.state.oauth_client_manager.get_oauth_token(
                 user.id, f'{connection_type}:{oauth_server_id}'
             )
+            if not oauth_token and connection_type == 'mcp':
+                # The Power BI MCP server may reuse the user's `powerbi` grant.
+                oauth_token = await get_powerbi_mcp_oauth_token(request, user, server_id)
             if oauth_token:
                 headers.update(bearer_auth_header(oauth_token.get('access_token', '')))
         except Exception as e:

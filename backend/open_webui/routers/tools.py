@@ -47,6 +47,7 @@ from open_webui.utils.plugin import (
     resolve_valves_schema_options,
     set_tool_module_in_cache,
 )
+from open_webui.utils.powerbi import get_powerbi_mcp_oauth_token
 from open_webui.utils.tools import connect_mcp_server, get_tool_servers
 from open_webui.utils.tools import get_tool_specs as get_local_tool_specs
 from pydantic import BaseModel, HttpUrl
@@ -157,6 +158,9 @@ async def get_tools(
                 session_token = await request.app.state.oauth_client_manager.get_oauth_token(
                     user.id, f'mcp:{server_id}'
                 )
+                if session_token is None:
+                    # The Power BI MCP server may reuse the user's `powerbi` grant.
+                    session_token = await get_powerbi_mcp_oauth_token(request, user, info.get('id'))
 
             tool_id = f'server:mcp:{info.get("id")}'
             server_connections[tool_id] = server
