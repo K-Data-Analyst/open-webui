@@ -1433,9 +1433,9 @@ class OAuthManager:
             # reaches here (e.g. via a stale cookie), bail out early
             # instead of attempting a refresh that will fail and delete
             # the session (#24618).
-            if (session.provider or '').startswith('mcp:'):
+            if (session.provider or '').startswith('mcp:') or session.provider == 'powerbi':
                 log.debug(
-                    'Skipping MCP session %s (provider=%s) in SSO OAuthManager — handled by oauth_client_manager',
+                    'Skipping client session %s (provider=%s) in SSO OAuthManager — handled by oauth_client_manager',
                     session.id,
                     session.provider,
                 )

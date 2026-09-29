@@ -227,6 +227,14 @@ forwards the user's SSO token, `utils/tools.py:153-157` — Mode B) or
 server's own AS (Mode A). This design only guarantees the *dataset selection*
 reaches the server; token plumbing is the existing tool-server config surface.
 
+**Shared grant.** For an `oauth_2.1`/`oauth_2.1_static` connection whose id
+equals `POWERBI_MCP_SERVER_ID` (and `POWERBI_AUTH_MODE=oauth_client`), the
+backend falls back to the user's `powerbi` OAuth session when no `mcp:<id>`
+session exists (`utils/powerbi.py`, used by `build_tool_server_headers` and the
+tools listing's `authenticated` flag). One "Connect Power BI" therefore covers
+both the dataset picker and the MCP tool calls; the dedicated AAD app must hold
+the scopes the MCP server expects.
+
 ## Frontend
 
 ### 1. Panel: `src/lib/components/chat/MessageInput/InputMenu/PowerBI.svelte`
