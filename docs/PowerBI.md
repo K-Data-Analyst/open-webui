@@ -235,6 +235,13 @@ tools listing's `authenticated` flag). One "Connect Power BI" therefore covers
 both the dataset picker and the MCP tool calls; the dedicated AAD app must hold
 the scopes the MCP server expects.
 
+**Tool servers must stay enabled.** Since upstream 0.12.0 the OAuth client
+routes (`/oauth/clients/{client_id}/authorize` and `/callback`) and the lazy
+client loader (`OAuthClientManager.ensure_client_from_config`) refuse with 403
+when `ENABLE_TOOL_SERVERS` is off. The `powerbi` client rides on that machinery,
+so "Connect Power BI" needs `ENABLE_TOOL_SERVERS=True` (the default) — which the
+MCP server requires anyway.
+
 ## Frontend
 
 ### 1. Panel: `src/lib/components/chat/MessageInput/InputMenu/PowerBI.svelte`
