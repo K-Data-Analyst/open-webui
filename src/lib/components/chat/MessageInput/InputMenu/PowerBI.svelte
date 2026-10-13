@@ -20,7 +20,7 @@
 
 	const i18n = getContext('i18n');
 
-	export let onSelect = (e) => {};
+	export let onSelect = (e, status = null) => {};
 
 	let loaded = false;
 	let selectedIdx = 0;
