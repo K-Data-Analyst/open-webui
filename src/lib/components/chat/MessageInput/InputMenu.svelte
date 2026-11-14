@@ -56,7 +56,15 @@
 	export let tab = '';
 	export let closeOnOutsideClick = true;
 	$: if (!show) tab = '';
-	$: hasInternalList = ['tools', 'skills', 'files', 'notes', 'knowledge', 'chats'].includes(tab);
+	$: hasInternalList = [
+		'tools',
+		'skills',
+		'files',
+		'notes',
+		'knowledge',
+		'powerbi',
+		'chats'
+	].includes(tab);
 
 	let showAttachWebpageModal = false;
 	$: showAddContext =
@@ -66,6 +74,7 @@
 			($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) &&
 			$visibleControls['chat.attach_notes']) ||
 		$visibleControls['chat.attach_knowledge'] ||
+		$config?.features?.enable_powerbi_integration ||
 		$visibleControls['chat.reference_chats'] ||
 		(fileUploadEnabled &&
 			($config?.features?.enable_google_drive_integration ||
@@ -743,12 +752,12 @@
 					<Knowledge {onSelect} />
 				</div>
 			{:else if tab === 'powerbi'}
-				<div class="flex max-h-72 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
+				<div class="flex min-h-0 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
 					<button
 						role="menuitem"
 						class="flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 						on:click={() => {
-							tab = '';
+							tab = 'attachments';
 						}}
 					>
 						<ChevronLeft />
