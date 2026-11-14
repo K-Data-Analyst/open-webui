@@ -273,9 +273,13 @@ onSelect({
 - On attach, if the configured Power BI MCP tool server isn't in
   `selectedToolIds`, add `server:mcp:<id>` so the tools are live for the send.
 
-Wire the tab into `InputMenu.svelte` next to Knowledge/Notes/Files/Chats
-(`InputMenu.svelte:507-564`), visible only when the integration is enabled
-(config flag exposed via the existing frontend config endpoint). Optionally add a
+Wire the tab into `InputMenu.svelte` next to Knowledge/Notes/Files/Chats,
+visible only when the integration is enabled (config flag exposed via the
+existing frontend config endpoint). Since upstream 0.13 those entries live in
+the **Add Context** submenu (`tab === 'attachments'`): the Power BI flag must be
+part of `showAddContext` (otherwise the entry is unreachable when every other
+attach control is hidden), the tab must be listed in `hasInternalList`, and its
+back button returns to `'attachments'`. Optionally add a
 `#` command panel via `CommandSuggestionList.svelte:119` later; the `+` menu is
 the MVP.
 

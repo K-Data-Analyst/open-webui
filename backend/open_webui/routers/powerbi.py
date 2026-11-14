@@ -45,7 +45,13 @@ async def get_powerbi_access_token(request: Request, user) -> Optional[str]:
 
         oauth_token = await get_system_oauth_token(request, user)
     else:
-        oauth_token = await request.app.state.oauth_client_manager.get_oauth_token(user.id, 'powerbi')
+        try:
+            oauth_token = await request.app.state.oauth_client_manager.get_oauth_token(user.id, 'powerbi')
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            # get_oauth_token re-raises transient provider failures (the grant is
+            # still valid) — surface them as retryable rather than "not connected".
+            log.warning(f'Transient failure refreshing Power BI token for user {user.id}: {e}')
+            raise HTTPException(status_code=503, detail='Power BI sign-in service is temporarily unavailable')
 
     return (oauth_token or {}).get('access_token') or None
 
