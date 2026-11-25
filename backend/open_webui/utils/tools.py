@@ -184,7 +184,7 @@ async def build_tool_server_headers(
             )
             if not oauth_token and connection_type == 'mcp':
                 # The Power BI MCP server may reuse the user's `powerbi` grant.
-                oauth_token = await get_powerbi_mcp_oauth_token(request, user, server_id)
+                oauth_token = await get_powerbi_mcp_oauth_token(request, user, server_id, force_refresh=refresh)
             if oauth_token:
                 headers.update(bearer_auth_header(oauth_token.get('access_token', '')))
         except Exception as e:

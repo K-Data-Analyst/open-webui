@@ -543,7 +543,7 @@
 					{#if $config?.features?.enable_powerbi_integration}
 						<button
 							role="menuitem"
-							class="flex gap-2 w-full items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl text-left"
+							class="flex gap-2 w-full items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-base-50/40 dark:hover:bg-base-800/40 rounded-xl text-left"
 							on:click={() => {
 								tab = 'powerbi';
 							}}
@@ -555,7 +555,7 @@
 									{$i18n.t('Attach Power BI Dataset')}
 								</div>
 
-								<div class="text-gray-500">
+								<div class="text-base-500">
 									<ChevronRight />
 								</div>
 							</div>
@@ -827,7 +827,7 @@
 				<div class="flex min-h-0 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
 					<button
 						role="menuitem"
-						class="flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+						class="flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-base-50/40 dark:hover:bg-base-800/40"
 						on:click={() => {
 							tab = 'attachments';
 						}}

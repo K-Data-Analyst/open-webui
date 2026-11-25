@@ -5,7 +5,7 @@ from open_webui.models.config import Config
 log = logging.getLogger(__name__)
 
 
-async def get_powerbi_mcp_oauth_token(request, user, server_id: str) -> dict | None:
+async def get_powerbi_mcp_oauth_token(request, user, server_id: str, force_refresh: bool = False) -> dict | None:
     """
     Fallback OAuth token for the configured Power BI MCP server.
 
@@ -15,6 +15,9 @@ async def get_powerbi_mcp_oauth_token(request, user, server_id: str) -> dict | N
     connection is *the* Power BI MCP server (``powerbi.mcp_server_id``) and the
     integration runs in ``oauth_client`` mode, reuse the ``powerbi`` grant so a
     single "Connect Power BI" covers both browsing and tool calls.
+
+    ``force_refresh`` mirrors ``OAuthClientManager.get_oauth_token``: the MCP
+    connection retries with it after the server rejects the current token.
 
     Returns None when the fallback does not apply or no token is available.
     """
@@ -30,7 +33,9 @@ async def get_powerbi_mcp_oauth_token(request, user, server_id: str) -> dict | N
         if (config.get('powerbi.auth_mode') or 'oauth_client') != 'oauth_client':
             return None
 
-        return await request.app.state.oauth_client_manager.get_oauth_token(user.id, 'powerbi')
+        return await request.app.state.oauth_client_manager.get_oauth_token(
+            user.id, 'powerbi', force_refresh=force_refresh
+        )
     except Exception as e:
         log.error(f'Error resolving Power BI OAuth token for MCP server {server_id}: {e}')
         return None

@@ -3313,9 +3313,7 @@ async def execute_tool_call(form_data, metadata, event_caller, tool_call, histor
     ):
         properties = tool.get('spec', {}).get('parameters', {}).get('properties', {})
         dataset_keys = [key for key in ('dataset_id', 'datasetId') if key in properties]
-        workspace_keys = [
-            key for key in ('workspace_id', 'workspaceId', 'group_id', 'groupId') if key in properties
-        ]
+        workspace_keys = [key for key in ('workspace_id', 'workspaceId', 'group_id', 'groupId') if key in properties]
         if len(powerbi_datasets) == 1:
             dataset = powerbi_datasets[0]
             for key in dataset_keys:
@@ -3335,7 +3333,6 @@ async def execute_tool_call(form_data, metadata, event_caller, tool_call, histor
                         '<attached_powerbi_datasets>.',
                         tool,
                         tool_type,
-                        direct_tool,
                     )
 
     requires_approval = await requires_tool_approval(form_data, metadata, tool_call, tool, params)

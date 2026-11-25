@@ -114,13 +114,11 @@
 
 	const getItemsPage = async (activeRequestId = requestId) => {
 		itemsLoading = true;
-		const res = await searchPowerBIWorkspaces(
-			localStorage.token,
-			query.trim() || null,
-			page
-		).catch(() => {
-			return null;
-		});
+		const res = await searchPowerBIWorkspaces(localStorage.token, query.trim() || null, page).catch(
+			() => {
+				return null;
+			}
+		);
 		if (activeRequestId !== requestId) return res;
 
 		if (res) {
@@ -210,7 +208,7 @@
 {#if loaded}
 	{#if !status?.enabled || !status?.connected}
 		<div class="flex flex-col items-center gap-2 px-2 py-4">
-			<div class="text-center text-sm text-gray-500 dark:text-gray-400">
+			<div class="text-center text-sm text-base-500 dark:text-base-400">
 				{#if status?.enabled}
 					{$i18n.t('Connect your Power BI account to browse your workspaces and datasets.')}
 				{:else}
@@ -220,7 +218,7 @@
 
 			{#if status?.enabled}
 				<button
-					class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+					class="px-3.5 py-1.5 text-sm font-medium bg-base-1000 hover:bg-base-900 text-base-0 dark:bg-base-0 dark:text-base-1000 dark:hover:bg-base-100 transition rounded-full"
 					type="button"
 					on:click={connectHandler}
 				>
@@ -256,15 +254,15 @@
 						<Spinner />
 					</div>
 				{:else if items.length === 0}
-					<div class="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+					<div class="py-4 text-center text-sm text-base-500 dark:text-base-400">
 						{$i18n.t('No workspaces found.')}
 					</div>
 				{:else}
 					{#each items as item, idx (item.id)}
 						<div
-							class=" h-[1.6875rem] px-2 rounded-xl w-full text-left flex justify-between items-center text-[13px] font-normal hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {idx ===
+							class=" h-[1.6875rem] px-2 rounded-xl w-full text-left flex justify-between items-center text-[13px] font-normal hover:bg-base-50/40 hover:text-base-900 dark:hover:bg-base-800/40 dark:hover:text-base-100 {idx ===
 							selectedIdx
-								? ' bg-gray-50/40 dark:bg-gray-800/40 dark:text-gray-100 selected-command-option-button'
+								? ' bg-base-50/40 dark:bg-base-800/40 dark:text-base-100 selected-command-option-button'
 								: ''}"
 						>
 							<button
@@ -287,7 +285,9 @@
 								}}
 								data-selected={idx === selectedIdx}
 							>
-								<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
+								<div
+									class="w-full text-left text-base-1000 dark:text-base-100 flex items-center gap-1"
+								>
 									<Tooltip content={$i18n.t('Workspace')} placement="top">
 										<Folder className="size-3.5" />
 									</Tooltip>
@@ -332,13 +332,13 @@
 										<Spinner className="size-3" />
 									</div>
 								{:else if selectedWorkspaceDatasetsTotal === 0}
-									<div class=" text-xs text-gray-500 dark:text-gray-400 italic py-0.5 px-2">
+									<div class=" text-xs text-base-500 dark:text-base-400 italic py-0.5 px-2">
 										{$i18n.t('No datasets in this workspace.')}
 									</div>
 								{:else}
 									{#each selectedWorkspaceDatasets as dataset (dataset.id)}
 										<button
-											class=" h-[1.6875rem] px-2 rounded-xl w-full text-left flex justify-between items-center text-[13px] font-normal hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100"
+											class=" h-[1.6875rem] px-2 rounded-xl w-full text-left flex justify-between items-center text-[13px] font-normal hover:bg-base-50/40 hover:text-base-900 dark:hover:bg-base-800/40 dark:hover:text-base-100"
 											type="button"
 											on:click={() => {
 												selectDataset(item, dataset);
